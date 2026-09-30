@@ -1,0 +1,12 @@
+# Personal training data: SQLite DB + raw uploads (GPS/HR). Back up separately.
+training-dashboard-local/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Local Claude Code settings
+.claude/settings.local.json
