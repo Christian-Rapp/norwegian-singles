@@ -28,6 +28,7 @@ function mondayOfISOWeek(y,w){ const jan4=new Date(y,0,4); const back=(jan4.getD
 
 const CLS={
   threshold:{label:"Threshold",color:"#e8590c"},
+  medium:{label:"Medium-hard",color:"#1098ad"},
   easy:{label:"Easy",color:"#2f9e44"},
   long_run:{label:"Long run",color:"#1971c2"},
   race:{label:"Race",color:"#a61e4d"},
@@ -330,7 +331,7 @@ async function viewWorkout(id){
   <div class="card">
     <h2>Correct classification</h2>
     <div class="row">
-      <select id="recls">${["threshold","easy","long_run","race","other"].map(c=>`<option value="${c}" ${c===a.classification?"selected":""}>${CLS[c].label}</option>`).join("")}</select>
+      <select id="recls">${["threshold","medium","easy","long_run","race","other"].map(c=>`<option value="${c}" ${c===a.classification?"selected":""}>${CLS[c].label}</option>`).join("")}</select>
       <button class="btn small" id="reclsbtn">Save correction</button>
       <span class="muted small" id="reclsmsg"></span>
     </div>
