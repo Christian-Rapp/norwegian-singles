@@ -571,15 +571,23 @@ async function viewSettings(){
     <p class="note">Saving re-runs classification over all stored sessions. Manual classification corrections are kept.</p>
   </div>
   <div class="card">
-    <h2>Strava import</h2>
+    <h2>Strava</h2>
+    ${s.strava_connected?`
+    <p>✅ Connected${s.strava_athlete?` as <strong>${esc(s.strava_athlete)}</strong>`:""}. <button class="btn ghost small" id="st-disconnect">Disconnect</button></p>
     <div class="frow">
-      <div class="fcol"><label class="f" for="st-token">Access token</label>
-        <input id="st-token" type="password" autocomplete="off" placeholder="paste short-lived token" style="width:320px"></div>
       <div class="fcol"><label class="f" for="st-since">Import since</label>
-        <input id="st-since" type="date" value="2026-08-01"></div>
+        <input id="st-since" type="date" value="2026-04-01"></div>
     </div>
     <div class="row" style="margin-top:10px"><button class="btn" id="st-go">Import from Strava</button><span class="muted small" id="st-msg"></span></div>
-    <p class="note">The token is used only for this one import and is never stored. Get one via the Strava API app's OAuth flow, then paste it here.</p>
+    <p class="note">Imports new runs and adds laps to earlier ones. Already-imported runs are skipped.</p>`:`
+    <div class="frow">
+      <div class="fcol"><label class="f" for="st-cid">Client ID</label>
+        <input id="st-cid" type="text" autocomplete="off" value="${esc(s.strava_client_id)}"></div>
+      <div class="fcol"><label class="f" for="st-secret">Client Secret</label>
+        <input id="st-secret" type="password" autocomplete="off" placeholder="${s.strava_has_secret?"saved — leave blank to keep":""}"></div>
+    </div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="st-connect">♥ Connect Strava</button><span class="muted small" id="st-msg"></span></div>
+    <p class="note">One-time setup: at <a href="https://www.strava.com/settings/api" target="_blank" rel="noopener">strava.com/settings/api</a>, set <strong>Authorization Callback Domain</strong> to <code>localhost</code>, then copy the Client ID and Client Secret here. Open this app at <code>http://localhost:8000</code> (not 127.0.0.1) when connecting. Your credentials and tokens stay in this app's local database.</p>`}
   </div>
   <div class="card">
     <h2>Data</h2>
@@ -607,14 +615,24 @@ async function viewSettings(){
       msg.textContent="Saved — classification re-run.";
     }catch(e){ msg.textContent="Save failed: "+e.message; }
   };
-  document.getElementById("st-go").onclick=async()=>{
+  const stGo=document.getElementById("st-go");
+  if(stGo) stGo.onclick=async()=>{
     const msg=document.getElementById("st-msg"); msg.textContent="Importing…";
     try{
-      const r=await jpost("/api/strava/import",{token:document.getElementById("st-token").value.trim(),since:document.getElementById("st-since").value||"2026-08-01"});
+      const r=await jpost("/api/strava/import",{since:document.getElementById("st-since").value||"2026-04-01"});
       msg.textContent=`Imported ${r.imported}, skipped ${r.skipped}.`+(r.laps_added?` Added laps to ${r.laps_added} earlier imports.`:"")+(r.note?" "+r.note:"");
-      document.getElementById("st-token").value="";
     }catch(e){ msg.textContent="Import failed: "+e.message; }
   };
+  const stConnect=document.getElementById("st-connect");
+  if(stConnect) stConnect.onclick=async()=>{
+    const msg=document.getElementById("st-msg");
+    const cid=document.getElementById("st-cid").value.trim(), secret=document.getElementById("st-secret").value.trim();
+    if(!cid||(!secret&&!s.strava_has_secret)){ msg.textContent="Enter your Client ID and Client Secret first."; return; }
+    try{ await jpost("/api/strava/credentials",{client_id:cid,client_secret:secret}); location.href="/strava/connect"; }
+    catch(e){ msg.textContent="Couldn't save: "+e.message; }
+  };
+  const stDisc=document.getElementById("st-disconnect");
+  if(stDisc) stDisc.onclick=async()=>{ await jpost("/api/strava/disconnect",{}); viewSettings(); };
 }
 
 /* ================= router / init ================= */

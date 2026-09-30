@@ -1,19 +1,59 @@
-"""Minimal Strava import (stdlib only): activities + streams via access token.
+"""Minimal Strava client (stdlib only): OAuth connect + activities, streams
+and laps.
 
-Used by the local app's Import view. The user pastes a short-lived access
-token (obtained via their own OAuth code exchange); nothing is stored except
-what the user explicitly saves in Settings.
+The user registers their own Strava API app and enters its client ID and
+secret in Settings; Connect Strava runs the OAuth flow and the app keeps
+the tokens locally, refreshing the 6-hour access token as needed.
 """
 
 import json
-import urllib.request
+import time
 import urllib.error
+import urllib.parse
+import urllib.request
 
 API = "https://www.strava.com/api/v3"
+AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
+TOKEN_URL = "https://www.strava.com/oauth/token"
+SCOPE = "activity:read_all"
 
 
 class RateLimited(RuntimeError):
     pass
+
+
+def authorize_url(client_id, redirect_uri):
+    return AUTHORIZE_URL + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "response_type": "code",
+        "redirect_uri": redirect_uri, "approval_prompt": "auto",
+        "scope": SCOPE})
+
+
+def _token_request(client_id, client_secret, **params):
+    """POST to the token endpoint. Returns {access_token, refresh_token,
+    expires_at, athlete?}."""
+    data = urllib.parse.urlencode(dict(params, client_id=client_id,
+                                       client_secret=client_secret)).encode()
+    req = urllib.request.Request(TOKEN_URL, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError("Strava %s: %s" % (e.code, e.read().decode()[:300]))
+
+
+def exchange_code(client_id, client_secret, code):
+    return _token_request(client_id, client_secret, code=code,
+                          grant_type="authorization_code")
+
+
+def refresh(client_id, client_secret, refresh_token):
+    return _token_request(client_id, client_secret, refresh_token=refresh_token,
+                          grant_type="refresh_token")
+
+
+def needs_refresh(expires_at, margin_s=120):
+    return not expires_at or float(expires_at) - margin_s <= time.time()
 
 
 def _get(path, token, params=""):

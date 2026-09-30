@@ -14,7 +14,7 @@ import sys
 import traceback
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import analysis
 import classifier
@@ -75,6 +75,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _redirect(self, location):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _html_message(self, code, title, text):
+        esc = lambda v: (v.replace("&", "&amp;").replace("<", "&lt;")
+                         .replace(">", "&gt;"))
+        self._send(code, "<!doctype html><meta charset=utf-8><title>%s</title>"
+                   "<body style='font-family:Verdana,sans-serif;padding:30px'>"
+                   "<h2>%s</h2><p>%s</p><p><a href='/#settings'>Back to Settings</a></p>"
+                   % (esc(title), esc(title), esc(text)), "text/html; charset=utf-8")
+
     def _json_body(self):
         ln = int(self.headers.get("Content-Length", 0))
         if not ln:
@@ -110,9 +124,14 @@ class Handler(BaseHTTPRequestHandler):
 
     # ----- routes -----
     def do_GET(self):
-        path = urlparse(self.path).path
+        url = urlparse(self.path)
+        path = url.path
         if path == "/" or path == "/index.html":
             return self._serve_static("index.html")
+        if path == "/strava/connect":
+            return self._strava_connect()
+        if path == "/strava/callback":
+            return self._strava_callback(parse_qs(url.query))
         if path.startswith("/api/"):
             return self._api_get(path)
         if path in ("/app.js", "/style.css", "/favicon.ico"):
@@ -129,6 +148,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._api_reclassify()
         if path == "/api/strava/import":
             return self._api_strava_import()
+        if path == "/api/strava/credentials":
+            return self._api_strava_credentials()
+        if path == "/api/strava/disconnect":
+            return self._api_strava_disconnect()
         self._send(404, {"error": "not found"})
 
     def _serve_static(self, name):
@@ -302,15 +325,104 @@ class Handler(BaseHTTPRequestHandler):
             json.dump(raw, f)
         return True
 
+    # ----- Strava connect (OAuth) -----
+    def _strava_connect(self):
+        conn = self._db()
+        try:
+            auth = db.strava_auth(conn)
+        finally:
+            conn.close()
+        if not auth["client_id"] or not auth["client_secret"]:
+            return self._html_message(400, "Strava app not set up",
+                                      "Enter your Strava Client ID and Client "
+                                      "Secret in Settings first.")
+        # Strava only redirects to the app's Authorization Callback Domain,
+        # so this must be the host the browser is using (localhost:PORT).
+        host = self.headers.get("Host") or "localhost:8000"
+        self._redirect(strava.authorize_url(
+            auth["client_id"], "http://%s/strava/callback" % host))
+
+    def _strava_callback(self, q):
+        if q.get("error"):
+            return self._html_message(400, "Strava not connected",
+                                      "Strava said: %s" % q["error"][0])
+        code = (q.get("code") or [""])[0]
+        scope = (q.get("scope") or [""])[0]
+        if not code:
+            return self._html_message(400, "Strava not connected",
+                                      "No authorization code came back.")
+        if "activity:read" not in scope:
+            return self._html_message(400, "Strava not connected",
+                                      "Activity access wasn't granted. Connect "
+                                      "again and leave \"View data about your "
+                                      "activities\" checked.")
+        conn = self._db()
+        try:
+            auth = db.strava_auth(conn)
+            tok = strava.exchange_code(auth["client_id"], auth["client_secret"], code)
+            self._save_strava_tokens(conn, tok)
+        except RuntimeError as e:
+            return self._html_message(502, "Strava not connected", str(e))
+        finally:
+            conn.close()
+        self._redirect("/#settings")
+
+    @staticmethod
+    def _save_strava_tokens(conn, tok):
+        updates = {"strava_access_token": tok["access_token"],
+                   "strava_refresh_token": tok["refresh_token"],
+                   "strava_expires_at": str(tok["expires_at"])}
+        ath = tok.get("athlete") or {}
+        if ath:
+            updates["strava_athlete"] = " ".join(
+                x for x in (ath.get("firstname"), ath.get("lastname")) if x)
+        db.save_settings(conn, updates)
+
+    def _strava_token(self, conn):
+        """Current access token, refreshed if it's about to expire; None
+        when Strava isn't connected."""
+        auth = db.strava_auth(conn)
+        if not auth["refresh_token"]:
+            return None
+        if strava.needs_refresh(auth["expires_at"]):
+            tok = strava.refresh(auth["client_id"], auth["client_secret"],
+                                 auth["refresh_token"])
+            self._save_strava_tokens(conn, tok)
+            return tok["access_token"]
+        return auth["access_token"]
+
+    def _api_strava_credentials(self):
+        conn = self._db()
+        try:
+            body = self._json_body()
+            updates = {"strava_client_id": str(body.get("client_id") or "").strip()}
+            # blank secret = keep the saved one
+            if (body.get("client_secret") or "").strip():
+                updates["strava_client_secret"] = body["client_secret"].strip()
+            db.save_settings(conn, updates)
+            return self._send(200, {"ok": True})
+        finally:
+            conn.close()
+
+    def _api_strava_disconnect(self):
+        conn = self._db()
+        try:
+            db.save_settings(conn, {"strava_access_token": "",
+                                    "strava_refresh_token": "",
+                                    "strava_expires_at": "", "strava_athlete": ""})
+            return self._send(200, {"ok": True})
+        finally:
+            conn.close()
+
     def _api_strava_import(self):
         conn = self._db()
         try:
             body = self._json_body()
-            token = (body.get("token") or "").strip()
             since = body.get("since") or "2026-08-01"
             after = int(datetime.datetime.fromisoformat(since).timestamp())
+            token = self._strava_token(conn)
             if not token:
-                return self._send(400, {"error": "missing token"})
+                return self._send(400, {"error": "Connect Strava in Settings first"})
             imported, skipped, laps_added, note = 0, 0, 0, None
             have = {r[0]: r[1] for r in conn.execute(
                 "SELECT source_file, id FROM activities WHERE source_file LIKE 'strava:%'")}

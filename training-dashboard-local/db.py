@@ -68,7 +68,14 @@ DEFAULT_SETTINGS = {
     # race -> LT multipliers (INCREMENT3 conversions)
     "race_lt_factors": json.dumps({"5000": 1.04, "10000": 1.00,
                                    "21097.5": 0.952381, "42195": 0.909091}),
-    "strava_token": "",
+    # Strava OAuth: the user's own API app + tokens from Connect Strava.
+    # Never sent to the browser (see get_settings); read with strava_auth().
+    "strava_client_id": "",
+    "strava_client_secret": "",
+    "strava_access_token": "",
+    "strava_refresh_token": "",
+    "strava_expires_at": "",
+    "strava_athlete": "",
 }
 
 
@@ -114,9 +121,22 @@ def get_settings(conn):
         "easy_cap_raw": s.get("easy_cap_hr") or "",
         "bakken_factors": json.loads(s.get("bakken_factors") or "{}"),
         "race_lt_factors": json.loads(s.get("race_lt_factors") or "{}"),
-        "strava_token": s.get("strava_token") or "",
+        "strava_client_id": s.get("strava_client_id") or "",
+        "strava_has_secret": bool(s.get("strava_client_secret")),
+        "strava_connected": bool(s.get("strava_refresh_token")),
+        "strava_athlete": s.get("strava_athlete") or "",
         "easy_cap_auto": not bool(s.get("easy_cap_hr")),
     }
+
+
+def strava_auth(conn):
+    """Strava credentials and tokens (server-side only)."""
+    keys = ("strava_client_id", "strava_client_secret", "strava_access_token",
+            "strava_refresh_token", "strava_expires_at")
+    rows = conn.execute("SELECT key, value FROM settings WHERE key IN (%s)"
+                        % ",".join("?" * len(keys)), keys).fetchall()
+    s = {r["key"]: r["value"] or "" for r in rows}
+    return {k[len("strava_"):]: s.get(k, "") for k in keys}
 
 
 def save_settings(conn, updates):

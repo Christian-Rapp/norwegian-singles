@@ -42,9 +42,10 @@ To stop: Ctrl-C in the Terminal window (or just close it).
 - **Race engine** — workout-derived LT pace (Bakken duration factors) vs
   race-predicted LT step line, race execution vs pre-race training prediction,
   and a read-only advisory suggested pace. Suggestions never change anything.
-- **Strava import** — paste a short-lived access token in Settings → Import
-  to pull activities since a date (your Mac can do the OAuth code exchange
-  that the sandboxed version couldn't).
+- **Strava** — Settings → Strava: enter your Strava API app's Client ID and
+  Secret once (set its Authorization Callback Domain to `localhost`), click
+  Connect Strava, then Import. Tokens are kept locally and refreshed
+  automatically; imports pull new runs and backfill laps.
 
 ## Settings worth setting first
 
