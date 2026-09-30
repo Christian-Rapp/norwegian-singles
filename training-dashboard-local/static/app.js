@@ -202,7 +202,7 @@ async function viewDashboard(){
     <div class="sharelegend">
       <span><span class="swatch" style="background:#b2d8b2"></span>target 20–25%</span>
       <span><span class="swatch" style="background:#e03131"></span>caution at 30%</span>
-      <span><span class="swatch" style="background:#212529"></span>this week</span>
+      <span><span class="swatch" style="background:#d6246e"></span>this week</span>
     </div>
   </div>
 
@@ -467,7 +467,7 @@ function raceExecutionHtml(rp,s){
     : `<p class="muted">No HR data for this race.</p>`;
   const formula=rp.predicted_lt!=null
     ? `<p class="note"><span class="formula">predicted LT = ${raceDistLabel(rp.race_dist)} pace × ${rp.factor}</span> = ${esc(fmtPace(rp.race_pace))} × ${rp.factor} = <strong>${esc(fmtPace(rp.predicted_lt))}</strong></p>`
-    : (rp.note?`<p class="note">${esc(rp.note)}</p>`:"");
+    : (rp.note&&rp.predicted_time!=null?`<p class="note">${esc(rp.note)}</p>`:"");
   return predLine+formula+hrCtx;
 }
 async function viewRaces(){
