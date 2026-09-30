@@ -250,7 +250,6 @@ async function viewWorkout(id){
         ${raceExecutionHtml(rp,st)}
         <p class="small"><a href="#races">All races →</a></p></div>`;
     }catch(e){ /* fall back to the plain race summary */ }
-    raceHtml+=splitsHtml(data.splits,isTrackRace(a));
   }
 
   // HR execution gauge
@@ -328,6 +327,7 @@ async function viewWorkout(id){
     ${tracked?`<p class="note">* Pace from nominal track distance — hover for the GPS reading. Track-snapped within ~10% of a standard distance.</p>`:""}`
     :`<p class="muted">No reps detected for this session.</p>`}
   </div>`:raceHtml||(ctxLine?`<div class="card">${ctxLine}</div>`:"")}
+  ${splitsHtml(data.splits,isTrackRace(a))}
   <div class="card">
     <h2>Correct classification</h2>
     <div class="row">
@@ -433,6 +433,9 @@ function ltStepChart(dots,steps){
   s+=`<text x="${ml}" y="${mt-4}" font-size="10">LT pace — faster ↑</text></svg>`;
   return s;
 }
+// track races in meters; otherwise meters for sub-mile laps (e.g. an 800
+// rep), miles for mile-ish and longer splits
+function splitDist(m,track){ return track||m<1500?fmtM(m):fmtMi(m); }
 function splitsHtml(sp,track){
   if(!sp||!sp.rows||!sp.rows.length) return "";
   const title=sp.source==="watch"?"Watch splits"
@@ -440,7 +443,7 @@ function splitsHtml(sp,track){
   return `<div class="card"><h2>${title}</h2>
     <table><thead><tr><th>#</th><th class="num">Distance</th><th class="num">Time</th><th class="num">Pace</th><th class="num">Avg HR</th><th class="num">Max HR</th></tr></thead><tbody>
     ${sp.rows.map((r,i)=>`<tr><td>${i+1}</td>
-      <td class="num">${esc(fmtRunDist(r.distance_m,track))}</td>
+      <td class="num">${esc(splitDist(r.distance_m,track))}</td>
       <td class="num">${esc(fmtClock(r.duration_s))}</td><td class="num">${esc(fmtPace(r.pace_s_per_km))}</td>
       <td class="num">${r.avg_hr!=null?Math.round(r.avg_hr):"–"}</td><td class="num">${r.max_hr!=null?Math.round(r.max_hr):"–"}</td></tr>`).join("")}
     </tbody></table></div>`;

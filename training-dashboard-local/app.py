@@ -194,11 +194,12 @@ class Handler(BaseHTTPRequestHandler):
                 bouts = [dict(r) for r in conn.execute(
                     "SELECT * FROM bouts WHERE activity_id=? ORDER BY idx", (aid,))]
                 body = {"activity": dict(a), "bouts": bouts}
-                if a["classification"] == "race":
-                    act = _load_stored(aid, a["source_file"])
-                    if act:
-                        body["splits"] = classifier.splits(
-                            act, bool(a["track_detected"]))
+                act = _load_stored(aid, a["source_file"])
+                if act:
+                    # 400 m splits only for track races; a track workout's
+                    # warmup/cooldown would make that dozens of rows
+                    body["splits"] = classifier.splits(
+                        act, a["classification"] == "race" and bool(a["track_detected"]))
                 return self._send(200, body)
             if path == "/api/progression":
                 return self._send(200, analysis.progression(conn))

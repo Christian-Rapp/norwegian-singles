@@ -479,7 +479,10 @@ MILE_M = 1609.344
 
 def _split_row(points, a, b, t0, t1, d0, d1):
     hrs = [points[k]["hr"] for k in range(a, b + 1) if points[k].get("hr") is not None]
-    dur, dist = t1 - t0, d1 - d0
+    # watch time: drop pauses (recording gaps) inside the split, as timer_time
+    paused = sum(dt for dt in (points[k + 1]["t"] - points[k]["t"] for k in range(a, b))
+                 if dt > 10)
+    dur, dist = t1 - t0 - paused, d1 - d0
     return {"distance_m": dist, "duration_s": dur,
             "pace_s_per_km": 1000.0 * dur / dist if dist > 0 else None,
             "avg_hr": sum(hrs) / len(hrs) if hrs else None,
