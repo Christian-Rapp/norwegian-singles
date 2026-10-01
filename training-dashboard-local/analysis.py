@@ -6,6 +6,7 @@ Pure functions over the DB. All pace values are seconds/km; times are unix.
 import datetime
 import json
 import math
+import time
 
 from db import get_settings
 
@@ -260,7 +261,25 @@ def vdot_series(conn, settings):
               "name": r["name"], "distance_m": r["distance_m"],
               "track": r["track"], "time_s": r["time_s"], "vdot": r["vdot"]}
              for r in race_predictions(conn, settings)]
-    return {"training": training, "races": races}
+    return {"training": training, "races": races,
+            "current": current_vdot(lt_pts)}
+
+
+PREDICT_DISTANCES = [("2 mile", 3218.688), ("5k", 5000.0),
+                     ("10k", 10000.0), ("Half", 21097.5)]
+
+
+def current_vdot(lt_pts):
+    """Training VDOT as of now, with race-time predictions; None if no
+    threshold work in the last 4 weeks."""
+    lt, n = _training_lt(lt_pts, time.time(), inclusive=True)
+    if lt is None:
+        return None
+    v = lt_vdot(lt)
+    return {"vdot": v, "training_lt": lt, "n": n,
+            "predictions": [{"label": lb, "distance_m": d,
+                             "time_s": vdot_race_time(v, d)}
+                            for lb, d in PREDICT_DISTANCES]}
 
 
 def race_execution(conn, settings):

@@ -120,6 +120,25 @@ function paceScatterSVG(o){
   s+=`<text x="${ml}" y="${mt-4}" font-size="10">${esc(o.yLabel||"")}</text></svg>`;
   return s;
 }
+/* Speedometer for current training VDOT: half-circle from VDOT_LO to VDOT_HI. */
+const VDOT_LO=40, VDOT_HI=80;
+function vdotGaugeSVG(v){
+  const W=260,H=172, cx=130,cy=120,r=104;
+  const ang=x=>Math.PI*(1-(Math.max(VDOT_LO,Math.min(VDOT_HI,x))-VDOT_LO)/(VDOT_HI-VDOT_LO));
+  const pt=(a,rr)=>[cx+rr*Math.cos(a),cy-rr*Math.sin(a)];
+  const arc=(a0,a1,rr)=>{ const [x0,y0]=pt(a0,rr),[x1,y1]=pt(a1,rr); return `M${x0.toFixed(1)},${y0.toFixed(1)} A${rr},${rr} 0 0 1 ${x1.toFixed(1)},${y1.toFixed(1)}`; };
+  let s=`<svg class="gauge" viewBox="0 0 ${W} ${H}" role="img" aria-label="Training VDOT ${v.toFixed(1)}">`;
+  const bands=["#f3e5fb","#d9b3f2","#b072e0","#7b3fa0"], step=(VDOT_HI-VDOT_LO)/bands.length;
+  bands.forEach((c,i)=>{ s+=`<path d="${arc(ang(VDOT_LO+i*step),ang(VDOT_LO+(i+1)*step),r)}" fill="none" stroke="${c}" stroke-width="22"/>`; });
+  for(let t=VDOT_LO;t<=VDOT_HI;t+=10){ const a=ang(t), [x0,y0]=pt(a,r-14), [x1,y1]=pt(a,r+14), [tx,ty]=pt(a,r-26);
+    s+=`<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" stroke="#fff" stroke-width="2"/>
+      <text x="${tx.toFixed(1)}" y="${(ty+4).toFixed(1)}" text-anchor="middle" font-size="10" fill="#8a5f86">${t}</text>`; }
+  const [nx,ny]=pt(ang(v),r-4);
+  s+=`<line x1="${cx}" y1="${cy}" x2="${nx.toFixed(1)}" y2="${ny.toFixed(1)}" stroke="#ff4fa3" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="${cx}" cy="${cy}" r="8" fill="#ff4fa3" stroke="#fff" stroke-width="2"/>
+    <text x="${cx}" y="${cy+44}" text-anchor="middle" font-size="30" font-weight="800" fill="#3b1740">${v.toFixed(1)}</text></svg>`;
+  return s;
+}
 function barChartSVG(o){
   // o: {labels:[], values:[], color, yFmt, W,H, band?:{lo,hi,color}, line?:{y,color,label}}
   const W=o.W||780,H=o.H||260, ml=48,mr=14,mt=16,mb=44;
@@ -356,7 +375,7 @@ async function viewProgression(){
   if(!series.length){ view.innerHTML=emptyHtml("No threshold sessions yet","Upload more sessions to see trends."); return; }
   const pts=series.map(s=>({x:s.date,y:s.avg_rep_pace,hr:s.avg_rep_hr,track:!!s.track,label:s.label,qmin:s.quality_min,id:s.activity_id,med:s.med_rep_s,medm:s.med_rep_m}));
 
-  const vd=p.vdot||{training:[],races:[]};
+  const vd=p.vdot||{training:[],races:[]}, cur=vd.current;
   const overlay=progShowVdot&&(vd.training.length||vd.races.length)?{color:"#495057",maxGap:28*86400,
     line:vd.training.map(t=>({x:t.date,y:t.vdot,lt:t.training_lt,n:t.n,id:t.activity_id})),
     dots:vd.races.map(r=>({x:r.date,y:r.vdot,race:true,short:r.distance_m<3000,name:r.name,d:r.distance_m,track:r.track,t:r.time_s,id:r.activity_id}))}:null;
@@ -390,8 +409,18 @@ async function viewProgression(){
     <div class="card"><h2>Quality minutes / week</h2>${qSvg||'<p class="muted">No data.</p>'}</div>
     <div class="card"><h2>Distance / week</h2>${kmSvg||'<p class="muted">No data.</p>'}</div>
   </div>
-  <div class="card"><h2>Threshold share history</h2>${shareSvg||'<p class="muted">No data.</p>'}
-    <div class="sharelegend"><span><span class="swatch" style="background:#2f9e44"></span>target 20–25%</span><span><span class="swatch" style="background:#e03131"></span>caution 30%</span></div>
+  <div class="grid2">
+    <div class="card"><h2>Threshold share history</h2>${shareSvg||'<p class="muted">No data.</p>'}
+      <div class="sharelegend"><span><span class="swatch" style="background:#2f9e44"></span>target 20–25%</span><span><span class="swatch" style="background:#e03131"></span>caution 30%</span></div>
+    </div>
+    <div class="card"><h2>Current training VDOT</h2>${cur?`
+      <div class="gaugewrap">${vdotGaugeSVG(cur.vdot)}</div>
+      <table><thead><tr><th>Race</th><th class="num">Est. time</th><th class="num">Pace</th></tr></thead><tbody>
+      ${cur.predictions.map(r=>`<tr><td>${esc(r.label)}</td><td class="num"><strong>${esc(fmtDur(r.time_s))}</strong></td><td class="num">${esc(fmtPace(r.time_s/(r.distance_m/1000)))}</td></tr>`).join("")}
+      </tbody></table>
+      <p class="note">From LT ${esc(fmtPace(cur.training_lt))} averaged over ${cur.n} threshold session${cur.n===1?"":"s"} in the last 4 weeks.</p>`
+      :'<p class="muted">No threshold sessions in the last 4 weeks.</p>'}
+    </div>
   </div>`;
 
   document.getElementById("vdottoggle").onchange=e=>{ progShowVdot=e.target.checked; viewProgression(); };
