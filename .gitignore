@@ -1,5 +1,5 @@
 # Personal training data: SQLite DB + raw uploads (GPS/HR). Back up separately.
-training-dashboard-local/data/
+data/
 
 # Python
 __pycache__/

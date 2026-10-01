@@ -13,7 +13,8 @@ cloud, your data never leaves the machine.
 **Or in Terminal:**
 
 ```bash
-cd /path/to/training-dashboard-local
+git clone <repo-url> norwegian-singles
+cd norwegian-singles
 python3 app.py
 ```
 
@@ -37,11 +38,15 @@ To stop: Ctrl-C in the Terminal window (or just close it).
   with the method's 20–25% target band (30% caution line).
 - **Workout detail** — rep table, HR execution gauge against your LTHR, and an
   automatic verdict (in zone / drifted hot / overcooked).
-- **Progression** — rep pace per template over time (HR-colored), quality
-  minutes/week, volume, threshold-share history, race markers.
+- **Progression** — rep pace over time colored by rep length (400 m red →
+  2 mi blue) with a rolling 4-week training VDOT overlay and race VDOTs,
+  quality minutes/week, volume, threshold-share history, and a current
+  training VDOT gauge with estimated 2 mile / 5k / 10k / half times.
 - **Race engine** — workout-derived LT pace (Bakken duration factors) vs
   race-predicted LT step line, race execution vs pre-race training prediction,
   and a read-only advisory suggested pace. Suggestions never change anything.
+  Races at non-standard distances convert through VDOT (Daniels–Gilbert);
+  races under 3 km are compared on VDOT but never set LT.
 - **Strava** — Settings → Strava: enter your Strava API app's Client ID and
   Secret once (set its Authorization Callback Domain to `localhost`), click
   Connect Strava, then Import. Tokens are kept locally and refreshed
@@ -62,7 +67,8 @@ Everything lives in the `data/` folder next to the app:
 - `data/uploads/` — your original uploaded files (kept so classification can
   be re-run after settings changes).
 
-Back up `data/` if you care about it. Delete it to start fresh.
+Back up `data/` if you care about it. Delete it to start fresh. It is
+git-ignored, so your training data and Strava tokens never get committed.
 
 ## Files
 
