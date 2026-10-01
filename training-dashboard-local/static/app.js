@@ -115,6 +115,35 @@ function paceScatterSVG(o){
   s+=`<text x="${ml}" y="${mt-4}" font-size="10">${esc(o.yLabel||"")}</text></svg>`;
   return s;
 }
+/* Training VDOT line (rolling 4-week workout LT) with race VDOT dots.
+   pts: [{x,y,race?,short?}]; the line breaks where sessions are >4 weeks apart. */
+function vdotChartSVG(pts){
+  const W=780,H=280, ml=48,mr=14,mt=16,mb=38, iw=W-ml-mr, ih=H-mt-mb;
+  let x0=Math.min(...pts.map(p=>p.x)), x1=Math.max(...pts.map(p=>p.x));
+  if(x0===x1){ x0-=86400; x1+=86400; }
+  const xp=(x1-x0)*0.04; x0-=xp; x1+=xp;
+  const y0=Math.floor(Math.min(...pts.map(p=>p.y))-1), y1=Math.ceil(Math.max(...pts.map(p=>p.y))+1);
+  const X=x=>ml+(x-x0)/(x1-x0)*iw, Y=y=>mt+(1-(y-y0)/(y1-y0))*ih;
+  let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">`;
+  for(const t of niceTicks(y0,y1,5)){ const y=Y(t);
+    s+=`<line class="grid" x1="${ml}" y1="${y}" x2="${W-mr}" y2="${y}"/><text x="${ml-8}" y="${y+3.5}" text-anchor="end">${t}</text>`; }
+  const spanDays=(x1-x0)/86400, stepD=Math.max(1,Math.ceil(spanDays/6));
+  for(let dx=Math.ceil(x0/86400)*86400; dx<=x1; dx+=stepD*86400)
+    s+=`<text x="${X(dx)}" y="${H-mb+18}" text-anchor="middle">${esc(fmtDate(dx))}</text>`;
+  s+=`<line class="axis" x1="${ml}" y1="${mt}" x2="${ml}" y2="${H-mb}"/><line class="axis" x1="${ml}" y1="${H-mb}" x2="${W-mr}" y2="${H-mb}"/>`;
+  let seg=[], prev=null;
+  const flush=()=>{ if(seg.length>1) s+=`<polyline points="${seg.join(" ")}" fill="none" stroke="#1971c2" stroke-width="2.5"/>`; seg=[]; };
+  for(const p of pts.filter(p=>!p.race)){
+    if(prev&&p.x-prev.x>28*86400) flush();
+    seg.push(`${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`); prev=p; }
+  flush();
+  pts.forEach((p,i)=>{ const cx=X(p.x).toFixed(1), cy=Y(p.y).toFixed(1);
+    s+=p.race
+      ?`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="6" fill="${p.short?"#fff":"#a61e4d"}" stroke="#a61e4d" stroke-width="2"/>`
+      :`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="3.5" fill="#1971c2" stroke="#fff" stroke-width="1"/>`; });
+  s+=`<text x="${ml}" y="${mt-4}" font-size="10">VDOT — higher ↑</text></svg>`;
+  return s;
+}
 function barChartSVG(o){
   // o: {labels:[], values:[], color, yFmt, W,H, band?:{lo,hi,color}, line?:{y,color,label}}
   const W=o.W||780,H=o.H||260, ml=48,mr=14,mt=16,mb=44;
@@ -353,6 +382,11 @@ async function viewProgression(){
 
   const heroSvg=paceScatterSVG({series:pts,races:p.races||[],showHR:progShowHR,colorFn:p=>repLenColor(p.medm),yFmt:fmtPace,yTicks:paceTicks,yLabel:"avg work-rep pace — faster ↑"});
 
+  const vd=p.vdot||{training:[],races:[]};
+  const vpts=[...vd.training.map(t=>({x:t.date,y:t.vdot,lt:t.training_lt,n:t.n,id:t.activity_id})),
+    ...vd.races.map(r=>({x:r.date,y:r.vdot,race:true,short:r.distance_m<3000,name:r.name,d:r.distance_m,track:r.track,t:r.time_s,id:r.activity_id}))];
+  const vdotSvg=vpts.length?vdotChartSVG(vpts):"";
+
   const weeks=[...p.weeks].sort((a,b)=>a.week<b.week?-1:1);
   const wlabels=weeks.map(w=>"W"+w.week.slice(6));
   const qSvg=weeks.length?barChartSVG({labels:wlabels,values:weeks.map(w=>w.quality_min||0),color:"#e8590c",yFmt:v=>Math.round(v)+"m"}):"";
@@ -374,6 +408,16 @@ async function viewProgression(){
     </div>
     <p class="note">Points only — never interpolated across gaps. Click a point to open the session.</p>
   </div>
+  <div class="card">
+    <h2>Training VDOT <span class="muted small">— rolling 4-week workout LT, as 10k pace</span></h2>
+    <div id="vdotchart">${vdotSvg||'<p class="muted">No data.</p>'}</div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#1971c2"></span>training VDOT</span>
+      <span><span class="swatch" style="background:#a61e4d;border-radius:50%"></span>race VDOT</span>
+      <span><span class="swatch" style="background:#fff;border:2px solid #a61e4d;border-radius:50%"></span>race under 3 km (doesn't set LT)</span>
+    </div>
+    <p class="note">Race dots above the line beat what training suggested; below fell short. The line breaks where threshold sessions are more than 4 weeks apart.</p>
+  </div>
   <div class="grid2">
     <div class="card"><h2>Quality minutes / week</h2>${qSvg||'<p class="muted">No data.</p>'}</div>
     <div class="card"><h2>Distance / week</h2>${kmSvg||'<p class="muted">No data.</p>'}</div>
@@ -387,6 +431,12 @@ async function viewProgression(){
     `<div class="tt-title">${esc(p.label||"Threshold")} · ${esc(fmtDate(p.x))}</div>
      pace ${esc(fmtPace(p.y))}${p.track?" ◆track":""}<br>
      <span class="mut">rep HR ${p.hr!=null?Math.round(p.hr)+" bpm":"–"} · Q ${p.qmin!=null?Math.round(p.qmin)+" min":"–"} · med rep ${p.medm?esc(splitDist(p.medm,p.track))+" / ":""}${p.med!=null?Math.round(p.med)+"s":"–"}</span>`,
+    p=>location.hash="#workout/"+p.id);
+  if(vdotSvg) wirePoints(document.getElementById("vdotchart"),vpts,p=>p.race
+    ?`<div class="tt-title">${esc(p.name||"Race")} · ${esc(fmtDate(p.x))}</div>
+      race VDOT ${p.y.toFixed(1)}<br><span class="mut">${esc(fmtRunDist(p.d,p.track))} in ${esc(fmtClock(p.t))}${p.short?" · under 3 km":""}</span>`
+    :`<div class="tt-title">Training VDOT · ${esc(fmtDate(p.x))}</div>
+      VDOT ${p.y.toFixed(1)}<br><span class="mut">LT ${esc(fmtPace(p.lt))} over ${p.n} session${p.n===1?"":"s"}</span>`,
     p=>location.hash="#workout/"+p.id);
 }
 
@@ -455,7 +505,7 @@ function raceExecutionHtml(rp,s){
     predLine=`<p><strong>Training suggested ${esc(fmtClock(rp.predicted_time))}; you ran ${esc(fmtClock(rp.time_s))}</strong> (${sgn(Math.round(shown))}s, ${shown<0?"-":"+"}${Math.abs(pct)}%)</p>
     <p><strong>Race VDOT ${rp.vdot.toFixed(1)}</strong> vs training VDOT ${rp.training_vdot.toFixed(1)} (${sgn(+dv.toFixed(1))})</p>
     <p class="note"><span class="formula">training LT ${esc(fmtPace(rp.training_lt))} as 10k pace → VDOT ${rp.training_vdot.toFixed(1)} → ${(rp.distance_m/MILE_M).toFixed(2)} mi in ${esc(fmtClock(rp.predicted_time))}</span><br>
-    <span class="muted">training LT = mean workout-derived LT over ${rp.n_prior} threshold sessions in the 6 weeks before the race.</span></p>`;
+    <span class="muted">training LT = mean workout-derived LT over ${rp.n_prior} threshold sessions in the 4 weeks before the race.</span></p>`;
   } else {
     predLine=`<p>Race VDOT <strong>${rp.vdot!=null?rp.vdot.toFixed(1):"–"}</strong></p>
     <p class="muted">No prediction — ${esc(rp.note||"not enough pre-race training data")}.</p>`;

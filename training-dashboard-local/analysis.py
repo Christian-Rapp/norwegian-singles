@@ -237,27 +237,50 @@ def race_predictions(conn, settings):
     return out
 
 
+TRAINING_WINDOW_S = 4 * 7 * 86400
+
+
+def _training_lt(lt_pts, t, inclusive=False):
+    """Mean workout-derived LT over the 4 weeks up to t: (pace, n)."""
+    prior = [p["lt_pace"] for p in lt_pts
+             if t - TRAINING_WINDOW_S <= p["date"]
+             and (p["date"] <= t if inclusive else p["date"] < t)]
+    return (sum(prior) / len(prior), len(prior)) if prior else (None, 0)
+
+
+def vdot_series(conn, settings):
+    """Rolling training VDOT at each threshold session, plus race VDOTs."""
+    lt_pts = workout_lt_points(conn, settings)
+    training = []
+    for p in lt_pts:
+        lt, n = _training_lt(lt_pts, p["date"], inclusive=True)
+        training.append({"date": p["date"], "activity_id": p["activity_id"],
+                         "training_lt": lt, "vdot": lt_vdot(lt), "n": n})
+    races = [{"date": r["date"], "activity_id": r["activity_id"],
+              "name": r["name"], "distance_m": r["distance_m"],
+              "track": r["track"], "time_s": r["time_s"], "vdot": r["vdot"]}
+             for r in race_predictions(conn, settings)]
+    return {"training": training, "races": races}
+
+
 def race_execution(conn, settings):
     """Per race: actual vs predicted-from-training time and VDOT."""
     lt_pts = workout_lt_points(conn, settings)
     results = []
     for rp in race_predictions(conn, settings):
-        # mean workout-derived LT over 6 weeks before the race
-        cutoff = rp["date"] - 6 * 7 * 86400
-        prior = [p["lt_pace"] for p in lt_pts if cutoff <= p["date"] < rp["date"]]
-        if not prior:
+        mean_lt, n_prior = _training_lt(lt_pts, rp["date"])
+        if mean_lt is None:
             results.append({**rp, "predicted_time": None, "delta_s": None,
                             "delta_pct": None, "training_vdot": None,
-                            "note": "no threshold sessions in prior 6 weeks"})
+                            "note": "no threshold sessions in prior 4 weeks"})
             continue
-        mean_lt = sum(prior) / len(prior)
         train_vdot = lt_vdot(mean_lt)
         pred_time = vdot_race_time(train_vdot, rp["distance_m"])
         delta = rp["time_s"] - pred_time
         results.append({**rp, "predicted_time": pred_time, "delta_s": delta,
                         "delta_pct": 100.0 * delta / pred_time,
                         "training_lt": mean_lt, "training_vdot": train_vdot,
-                        "n_prior": len(prior)})
+                        "n_prior": n_prior})
     return results
 
 

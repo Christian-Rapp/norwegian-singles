@@ -202,7 +202,9 @@ class Handler(BaseHTTPRequestHandler):
                         act, a["classification"] == "race" and bool(a["track_detected"]))
                 return self._send(200, body)
             if path == "/api/progression":
-                return self._send(200, analysis.progression(conn))
+                body = analysis.progression(conn)
+                body["vdot"] = analysis.vdot_series(conn, db.get_settings(conn))
+                return self._send(200, body)
             if path == "/api/lt":
                 s = db.get_settings(conn)
                 return self._send(200, {
