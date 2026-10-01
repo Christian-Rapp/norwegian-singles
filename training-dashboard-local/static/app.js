@@ -68,13 +68,12 @@ function niceTicks(lo,hi,n){
   const out=[]; for(let v=Math.ceil(lo/step)*step; v<=hi+1e-9; v+=step) out.push(+v.toFixed(6));
   return out.length?out:[lo];
 }
-function hrColor(hr,lo,hi){
-  if(hr==null||!isFinite(hr)) return "#adb5bd";
-  let t=(hr-lo)/Math.max(1e-9,hi-lo); t=Math.max(0,Math.min(1,t));
-  const c1=[25,113,194],c2=[252,196,25],c3=[224,49,49];
-  const a=t<0.5?c1:c2, b=t<0.5?c2:c3, f=t<0.5?t*2:(t-0.5)*2;
-  const c=a.map((v,i)=>Math.round(v+(b[i]-v)*f));
-  return `rgb(${c[0]},${c[1]},${c[2]})`;
+// rep length → color on a log scale: 400 m red through to 2 mi blue
+const REP_M_LO=400, REP_M_HI=2*1609.344;
+function repLenColor(m){
+  if(m==null||!(m>0)) return "#adb5bd";
+  let t=Math.log(m/REP_M_LO)/Math.log(REP_M_HI/REP_M_LO); t=Math.max(0,Math.min(1,t));
+  return `hsl(${Math.round(t*215)},75%,${Math.round(48-t*6)}%)`;
 }
 /* Scatter of pace-over-time. Y inverted: faster is up. No connecting lines — no interpolation across gaps. */
 function paceScatterSVG(o){
@@ -104,19 +103,17 @@ function paceScatterSVG(o){
       s+=`<polyline points="${d}" fill="none" stroke="#e03131" stroke-width="1.5" opacity="0.55"/>`;
       for(const t of niceTicks(h0,h1,5)){ const y=HY(t);
         s+=`<text x="${W-mr+8}" y="${y+3.5}" fill="#e03131">${Math.round(t)}</text>`; }
-      s+=`<text x="${W-6}" y="${mt-2}" text-anchor="end" fill="#e03131" font-size="10">HR bpm</text>`;
+      s+=`<text x="${W-6}" y="${mt-2}" text-anchor="end" fill="#e03131" font-size="10">rep HR bpm</text>`;
     } }
   // points
-  const hrs=pts.map(p=>p.hr).filter(h=>h!=null&&isFinite(h));
-  const hlo=hrs.length?Math.min(...hrs):0, hhi=hrs.length?Math.max(...hrs):1;
-  pts.forEach((p,i)=>{ const cx=X(p.x).toFixed(1), cy=Y(p.y).toFixed(1), c=hrColor(p.hr,hlo,hhi);
+  pts.forEach((p,i)=>{ const cx=X(p.x).toFixed(1), cy=Y(p.y).toFixed(1), c=o.colorFn?o.colorFn(p):"#1971c2";
     if(p.track){ const r=6;
       s+=`<polygon class="pt" data-i="${i}" points="${cx},${cy-r} ${+cx+r},${cy} ${cx},${+cy+r} ${cx-r},${cy}" fill="${c}" stroke="#212529" stroke-width="1.5"/>`;
     } else {
       s+=`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="5.5" fill="${c}" stroke="#fff" stroke-width="1.5"/>`;
     } });
   s+=`<text x="${ml}" y="${mt-4}" font-size="10">${esc(o.yLabel||"")}</text></svg>`;
-  return {svg:s, hrRange:[hlo,hhi]};
+  return s;
 }
 function barChartSVG(o){
   // o: {labels:[], values:[], color, yFmt, W,H, band?:{lo,hi,color}, line?:{y,color,label}}
@@ -347,19 +344,14 @@ async function viewWorkout(id){
 }
 
 /* ================= PROGRESSION ================= */
-let progTemplate=null, progShowHR=false;
+let progShowHR=false;
 async function viewProgression(){
   let p; try{ p=await jget("/api/progression"); }catch(e){ view.innerHTML=errHtml(e); return; }
-  const keys=Object.keys(p.by_template).sort();
-  if(!keys.length){ view.innerHTML=emptyHtml("No threshold sessions yet","Upload more sessions to see trends."); return; }
-  if(!progTemplate||!p.by_template[progTemplate]) progTemplate=p.by_template["short"]?"short":keys[0];
-  const series=[...p.by_template[progTemplate]].sort((a,b)=>a.date-b.date);
-  const pts=series.map(s=>({x:s.date,y:s.avg_rep_pace,hr:s.avg_rep_hr,track:!!s.track,label:s.label,qmin:s.quality_min,id:s.activity_id,med:s.med_rep_s}));
+  const series=Object.values(p.by_template).flat().sort((a,b)=>a.date-b.date);
+  if(!series.length){ view.innerHTML=emptyHtml("No threshold sessions yet","Upload more sessions to see trends."); return; }
+  const pts=series.map(s=>({x:s.date,y:s.avg_rep_pace,hr:s.avg_rep_hr,track:!!s.track,label:s.label,qmin:s.quality_min,id:s.activity_id,med:s.med_rep_s,medm:s.med_rep_m}));
 
-  const chips=keys.map(k=>{const n=p.by_template[k].length;
-    return `<button class="chip${k===progTemplate?" active":""}" data-t="${esc(k)}">${esc(k)} · ${n}</button>`;}).join("");
-
-  const {svg:heroSvg,hrRange}=paceScatterSVG({series:pts,races:p.races||[],showHR:progShowHR,yFmt:fmtPace,yTicks:paceTicks,yLabel:"avg work-rep pace — faster ↑"});
+  const heroSvg=paceScatterSVG({series:pts,races:p.races||[],showHR:progShowHR,colorFn:p=>repLenColor(p.medm),yFmt:fmtPace,yTicks:paceTicks,yLabel:"avg work-rep pace — faster ↑"});
 
   const weeks=[...p.weeks].sort((a,b)=>a.week<b.week?-1:1);
   const wlabels=weeks.map(w=>"W"+w.week.slice(6));
@@ -372,12 +364,11 @@ async function viewProgression(){
   <div class="card">
     <div class="row spread">
       <h2 style="margin:0">Rep pace over time <span class="muted small">— pace is the trend signal</span></h2>
-      <label class="small"><input type="checkbox" id="hrtoggle" ${progShowHR?"checked":""}> show HR (right axis)</label>
+      <label class="small"><input type="checkbox" id="hrtoggle" ${progShowHR?"checked":""}> show avg rep HR (right axis)</label>
     </div>
-    <div class="row" style="margin:8px 0">${chips}</div>
     <div id="hero">${heroSvg}</div>
     <div class="legend">
-      <span><span class="swatch gradbar"></span>avg rep HR ${hrRange[1]>hrRange[0]?`(${Math.round(hrRange[0])}–${Math.round(hrRange[1])} bpm)`:"(no HR data)"}</span>
+      <span>rep length: 400 m <span class="swatch gradbar"></span> 2 mi</span>
       <span>◆ track-snapped rep</span>
       <span style="color:#a61e4d;font-weight:700">R race</span>
     </div>
@@ -391,12 +382,11 @@ async function viewProgression(){
     <div class="sharelegend"><span><span class="swatch" style="background:#2f9e44"></span>target 20–25%</span><span><span class="swatch" style="background:#e03131"></span>caution 30%</span></div>
   </div>`;
 
-  view.querySelectorAll(".chip").forEach(c=>c.onclick=()=>{ progTemplate=c.dataset.t; viewProgression(); });
   document.getElementById("hrtoggle").onchange=e=>{ progShowHR=e.target.checked; viewProgression(); };
   wirePoints(document.getElementById("hero"),pts,p=>
     `<div class="tt-title">${esc(p.label||"Threshold")} · ${esc(fmtDate(p.x))}</div>
      pace ${esc(fmtPace(p.y))}${p.track?" ◆track":""}<br>
-     <span class="mut">HR ${p.hr!=null?Math.round(p.hr)+" bpm":"–"} · Q ${p.qmin!=null?Math.round(p.qmin)+" min":"–"} · med rep ${p.med!=null?Math.round(p.med)+"s":"–"}</span>`,
+     <span class="mut">rep HR ${p.hr!=null?Math.round(p.hr)+" bpm":"–"} · Q ${p.qmin!=null?Math.round(p.qmin)+" min":"–"} · med rep ${p.medm?esc(splitDist(p.medm,p.track))+" / ":""}${p.med!=null?Math.round(p.med)+"s":"–"}</span>`,
     p=>location.hash="#workout/"+p.id);
 }
 

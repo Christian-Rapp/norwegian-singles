@@ -201,7 +201,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .chart .axis{stroke:#d9a6e8;stroke-width:1}
 .pt{cursor:pointer}
 .legend{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--muted);margin:6px 0;flex-wrap:wrap}
-.gradbar{width:120px;height:10px;border-radius:5px;background:linear-gradient(90deg,#1971c2,#fcc419,#e03131)}
+.gradbar{width:120px;height:10px;border-radius:5px;background:linear-gradient(90deg,hsl(0,75%,48%),hsl(54,75%,46%),hsl(108,75%,45%),hsl(161,75%,44%),hsl(215,75%,42%))}
 
 /* XP-style tooltip */
 .tooltip{

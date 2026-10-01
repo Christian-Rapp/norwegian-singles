@@ -89,12 +89,14 @@ def progression(conn):
         hrs = [b["avg_hr"] for b in bouts if b["avg_hr"] is not None]
         avg_hr = sum(hrs) / len(hrs) if hrs else None
         med_dur = sorted(b["duration_s"] for b in bouts)[len(bouts) // 2]
+        med_dist = sorted(b["nominal_m"] or b["distance_m"] or 0
+                          for b in bouts)[len(bouts) // 2]
         key = a["template"] or "short"
         by_template.setdefault(key, []).append({
             "activity_id": a["id"], "date": a["start_time"],
             "label": a["template_label"], "avg_rep_pace": avg_pace,
             "avg_rep_hr": avg_hr, "quality_min": a["quality_minutes"],
-            "med_rep_s": med_dur,
+            "med_rep_s": med_dur, "med_rep_m": med_dist,
             "track": bool(a["track_detected"]),
         })
     weeks = [dict(r) for r in conn.execute("SELECT * FROM weeks ORDER BY week")]
