@@ -29,6 +29,7 @@ function mondayOfISOWeek(y,w){ const jan4=new Date(y,0,4); const back=(jan4.getD
 const CLS={
   threshold:{label:"Threshold",color:"#e8590c"},
   medium:{label:"Medium-hard",color:"#1098ad"},
+  speed:{label:"Speed workout",color:"#7950f2"},
   easy:{label:"Easy",color:"#2f9e44"},
   long_run:{label:"Long run",color:"#1971c2"},
   race:{label:"Race",color:"#a61e4d"},
@@ -211,11 +212,11 @@ async function viewDashboard(){
     <h2>Workouts this week</h2>
     <table><thead><tr><th>Date</th><th>Session</th><th>Type</th><th class="num">Dist</th><th class="num">Time</th><th class="num">Pace</th><th class="num">HR</th><th class="num">Q min</th></tr></thead>
     <tbody>${weekRuns.map(a=>`<tr class="clickable" data-id="${a.id}">
-      <td>${esc(fmtDate(a.start_time))}</td><td><strong>${esc(a.name||"Run")}</strong>${a.track_detected?' <span class="badge track">track</span>':""}<div class="small muted">${esc(a.template_label||"")}</div></td>
+      <td>${esc(fmtDate(a.start_time))}</td><td><strong>${esc(a.name||"Run")}</strong>${a.track_detected?' <span class="badge track">track</span>':""}<div class="small muted">${a.classification==="threshold"?esc(a.template_label||""):""}</div></td>
       <td>${clsBadge(a.classification)}</td>
       <td class="num">${esc(fmtRunDist(a.distance_m,isTrackRace(a)))}</td><td class="num">${esc(fmtDur(a.timer_s||a.elapsed_s))}</td>
       <td class="num">${esc(fmtPace(a.avg_pace))}</td><td class="num">${a.avg_hr?Math.round(a.avg_hr):"–"}</td>
-      <td class="num">${a.quality_minutes?Math.round(a.quality_minutes):"–"}</td></tr>`).join("")}</tbody></table>
+      <td class="num">${a.classification==="threshold"&&a.quality_minutes?Math.round(a.quality_minutes):"–"}</td></tr>`).join("")}</tbody></table>
     ${weekRuns.length?"":'<p class="muted">No runs this week.</p>'}
   </div>`;
 
@@ -331,7 +332,7 @@ async function viewWorkout(id){
   <div class="card">
     <h2>Correct classification</h2>
     <div class="row">
-      <select id="recls">${["threshold","medium","easy","long_run","race","other"].map(c=>`<option value="${c}" ${c===a.classification?"selected":""}>${CLS[c].label}</option>`).join("")}</select>
+      <select id="recls">${["threshold","speed","medium","easy","long_run","race","other"].map(c=>`<option value="${c}" ${c===a.classification?"selected":""}>${CLS[c].label}</option>`).join("")}</select>
       <button class="btn small" id="reclsbtn">Save correction</button>
       <span class="muted small" id="reclsmsg"></span>
     </div>

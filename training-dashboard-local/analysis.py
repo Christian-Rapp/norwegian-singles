@@ -54,7 +54,10 @@ def refresh_weeks(conn):
             "SELECT * FROM activities WHERE sport='run'").fetchall()
         lst = [a for a in lst if a["start_time"] and iso_week(a["start_time"]) == wk]
         total_min = sum(_run_time(a) for a in lst) / 60.0
-        quality_min = sum((a["quality_minutes"] or 0) for a in lst)
+        # threshold only: a run relabeled by hand (speed, medium-hard, ...)
+        # keeps its detected rep minutes but isn't threshold work
+        quality_min = sum((a["quality_minutes"] or 0) for a in lst
+                          if a["classification"] == "threshold")
         q_sessions = sum(1 for a in lst if a["classification"] == "threshold")
         easy_min = sum(_run_time(a) / 60.0 for a in lst
                        if a["classification"] in ("easy", "long_run"))
