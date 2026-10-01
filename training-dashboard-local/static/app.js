@@ -77,10 +77,11 @@ function repLenColor(m){
 }
 /* Scatter of pace-over-time. Y inverted: faster is up. No connecting lines — no interpolation across gaps. */
 function paceScatterSVG(o){
-  const W=o.W||780,H=o.H||360, ml=58,mr=o.showHR?54:14,mt=16,mb=38;
+  const ov=o.overlay, W=o.W||780,H=o.H||360, ml=58,mr=ov?44:14,mt=16,mb=38;
   const iw=W-ml-mr, ih=H-mt-mb;
-  const pts=o.series;
-  let x0=Math.min(...pts.map(p=>p.x)), x1=Math.max(...pts.map(p=>p.x));
+  const pts=o.series, ovPts=ov?[...ov.line,...ov.dots]:[];
+  const xs=[...pts,...ovPts].map(p=>p.x);
+  let x0=Math.min(...xs), x1=Math.max(...xs);
   if(x0===x1){ x0-=86400; x1+=86400; }
   const xp=(x1-x0)*0.04; x0-=xp; x1+=xp;
   let y0=Math.min(...pts.map(p=>p.y))-(o.yPad||8), y1=Math.max(...pts.map(p=>p.y))+(o.yPad||8);
@@ -95,16 +96,18 @@ function paceScatterSVG(o){
   // race markers
   for(const r of (o.races||[])){ if(r.start_time<x0||r.start_time>x1) continue; const x=X(r.start_time);
     s+=`<line x1="${x}" y1="${mt}" x2="${x}" y2="${H-mb}" stroke="#a61e4d" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/><text x="${x+4}" y="${mt+12}" fill="#a61e4d" font-weight="700">R</text>`; }
-  // HR secondary axis
-  if(o.showHR){ const hrs=pts.map(p=>p.hr).filter(h=>h!=null&&isFinite(h));
-    if(hrs.length){ const h0=Math.min(...hrs)-5,h1=Math.max(...hrs)+5;
-      const HY=h=>mt+(h-h0)/(h1-h0)*ih;
-      const d=pts.filter(p=>p.hr!=null).map(p=>`${X(p.x).toFixed(1)},${HY(p.hr).toFixed(1)}`).join(" ");
-      s+=`<polyline points="${d}" fill="none" stroke="#e03131" stroke-width="1.5" opacity="0.55"/>`;
-      for(const t of niceTicks(h0,h1,5)){ const y=HY(t);
-        s+=`<text x="${W-mr+8}" y="${y+3.5}" fill="#e03131">${Math.round(t)}</text>`; }
-      s+=`<text x="${W-6}" y="${mt-2}" text-anchor="end" fill="#e03131" font-size="10">rep HR bpm</text>`;
-    } }
+  // VDOT secondary axis: training line, higher is up
+  let VY=null;
+  if(ovPts.length){ const v0=Math.floor(Math.min(...ovPts.map(p=>p.y))-1), v1=Math.ceil(Math.max(...ovPts.map(p=>p.y))+1);
+    VY=v=>mt+(1-(v-v0)/(v1-v0))*ih;
+    let seg=[], prev=null;
+    const flush=()=>{ if(seg.length>1) s+=`<polyline points="${seg.join(" ")}" fill="none" stroke="${ov.color}" stroke-width="2" opacity="0.8"/>`; seg=[]; };
+    for(const p of ov.line){ if(prev&&p.x-prev.x>ov.maxGap) flush();
+      seg.push(`${X(p.x).toFixed(1)},${VY(p.y).toFixed(1)}`); prev=p; }
+    flush();
+    for(const t of niceTicks(v0,v1,5)) if(VY(t)>mt+8) s+=`<text x="${W-mr+8}" y="${VY(t)+3.5}" fill="${ov.color}">${t}</text>`;
+    s+=`<text x="${W-6}" y="${mt-4}" text-anchor="end" fill="${ov.color}" font-size="10">VDOT ↑</text>`;
+  }
   // points
   pts.forEach((p,i)=>{ const cx=X(p.x).toFixed(1), cy=Y(p.y).toFixed(1), c=o.colorFn?o.colorFn(p):"#1971c2";
     if(p.track){ const r=6;
@@ -112,36 +115,9 @@ function paceScatterSVG(o){
     } else {
       s+=`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="5.5" fill="${c}" stroke="#fff" stroke-width="1.5"/>`;
     } });
+  // race VDOT dots on top, indexed after the series for wirePoints
+  if(VY) ov.dots.forEach((p,j)=>{ s+=`<circle class="pt" data-i="${pts.length+j}" cx="${X(p.x).toFixed(1)}" cy="${VY(p.y).toFixed(1)}" r="6" fill="${p.short?"#fff":"#a61e4d"}" stroke="#a61e4d" stroke-width="2"/>`; });
   s+=`<text x="${ml}" y="${mt-4}" font-size="10">${esc(o.yLabel||"")}</text></svg>`;
-  return s;
-}
-/* Training VDOT line (rolling 4-week workout LT) with race VDOT dots.
-   pts: [{x,y,race?,short?}]; the line breaks where sessions are >4 weeks apart. */
-function vdotChartSVG(pts){
-  const W=780,H=280, ml=48,mr=14,mt=16,mb=38, iw=W-ml-mr, ih=H-mt-mb;
-  let x0=Math.min(...pts.map(p=>p.x)), x1=Math.max(...pts.map(p=>p.x));
-  if(x0===x1){ x0-=86400; x1+=86400; }
-  const xp=(x1-x0)*0.04; x0-=xp; x1+=xp;
-  const y0=Math.floor(Math.min(...pts.map(p=>p.y))-1), y1=Math.ceil(Math.max(...pts.map(p=>p.y))+1);
-  const X=x=>ml+(x-x0)/(x1-x0)*iw, Y=y=>mt+(1-(y-y0)/(y1-y0))*ih;
-  let s=`<svg class="chart" viewBox="0 0 ${W} ${H}" role="img">`;
-  for(const t of niceTicks(y0,y1,5)){ const y=Y(t);
-    s+=`<line class="grid" x1="${ml}" y1="${y}" x2="${W-mr}" y2="${y}"/><text x="${ml-8}" y="${y+3.5}" text-anchor="end">${t}</text>`; }
-  const spanDays=(x1-x0)/86400, stepD=Math.max(1,Math.ceil(spanDays/6));
-  for(let dx=Math.ceil(x0/86400)*86400; dx<=x1; dx+=stepD*86400)
-    s+=`<text x="${X(dx)}" y="${H-mb+18}" text-anchor="middle">${esc(fmtDate(dx))}</text>`;
-  s+=`<line class="axis" x1="${ml}" y1="${mt}" x2="${ml}" y2="${H-mb}"/><line class="axis" x1="${ml}" y1="${H-mb}" x2="${W-mr}" y2="${H-mb}"/>`;
-  let seg=[], prev=null;
-  const flush=()=>{ if(seg.length>1) s+=`<polyline points="${seg.join(" ")}" fill="none" stroke="#1971c2" stroke-width="2.5"/>`; seg=[]; };
-  for(const p of pts.filter(p=>!p.race)){
-    if(prev&&p.x-prev.x>28*86400) flush();
-    seg.push(`${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`); prev=p; }
-  flush();
-  pts.forEach((p,i)=>{ const cx=X(p.x).toFixed(1), cy=Y(p.y).toFixed(1);
-    s+=p.race
-      ?`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="6" fill="${p.short?"#fff":"#a61e4d"}" stroke="#a61e4d" stroke-width="2"/>`
-      :`<circle class="pt" data-i="${i}" cx="${cx}" cy="${cy}" r="3.5" fill="#1971c2" stroke="#fff" stroke-width="1"/>`; });
-  s+=`<text x="${ml}" y="${mt-4}" font-size="10">VDOT — higher ↑</text></svg>`;
   return s;
 }
 function barChartSVG(o){
@@ -373,19 +349,18 @@ async function viewWorkout(id){
 }
 
 /* ================= PROGRESSION ================= */
-let progShowHR=false;
+let progShowVdot=true;
 async function viewProgression(){
   let p; try{ p=await jget("/api/progression"); }catch(e){ view.innerHTML=errHtml(e); return; }
   const series=Object.values(p.by_template).flat().sort((a,b)=>a.date-b.date);
   if(!series.length){ view.innerHTML=emptyHtml("No threshold sessions yet","Upload more sessions to see trends."); return; }
   const pts=series.map(s=>({x:s.date,y:s.avg_rep_pace,hr:s.avg_rep_hr,track:!!s.track,label:s.label,qmin:s.quality_min,id:s.activity_id,med:s.med_rep_s,medm:s.med_rep_m}));
 
-  const heroSvg=paceScatterSVG({series:pts,races:p.races||[],showHR:progShowHR,colorFn:p=>repLenColor(p.medm),yFmt:fmtPace,yTicks:paceTicks,yLabel:"avg work-rep pace — faster ↑"});
-
   const vd=p.vdot||{training:[],races:[]};
-  const vpts=[...vd.training.map(t=>({x:t.date,y:t.vdot,lt:t.training_lt,n:t.n,id:t.activity_id})),
-    ...vd.races.map(r=>({x:r.date,y:r.vdot,race:true,short:r.distance_m<3000,name:r.name,d:r.distance_m,track:r.track,t:r.time_s,id:r.activity_id}))];
-  const vdotSvg=vpts.length?vdotChartSVG(vpts):"";
+  const overlay=progShowVdot&&(vd.training.length||vd.races.length)?{color:"#495057",maxGap:28*86400,
+    line:vd.training.map(t=>({x:t.date,y:t.vdot,lt:t.training_lt,n:t.n,id:t.activity_id})),
+    dots:vd.races.map(r=>({x:r.date,y:r.vdot,race:true,short:r.distance_m<3000,name:r.name,d:r.distance_m,track:r.track,t:r.time_s,id:r.activity_id}))}:null;
+  const heroSvg=paceScatterSVG({series:pts,races:p.races||[],overlay,colorFn:p=>repLenColor(p.medm),yFmt:fmtPace,yTicks:paceTicks,yLabel:"avg work-rep pace — faster ↑"});
 
   const weeks=[...p.weeks].sort((a,b)=>a.week<b.week?-1:1);
   const wlabels=weeks.map(w=>"W"+w.week.slice(6));
@@ -398,25 +373,18 @@ async function viewProgression(){
   <div class="card">
     <div class="row spread">
       <h2 style="margin:0">Rep pace over time <span class="muted small">— pace is the trend signal</span></h2>
-      <label class="small"><input type="checkbox" id="hrtoggle" ${progShowHR?"checked":""}> show avg rep HR (right axis)</label>
+      <label class="small"><input type="checkbox" id="vdottoggle" ${progShowVdot?"checked":""}> show training VDOT (right axis)</label>
     </div>
     <div id="hero">${heroSvg}</div>
     <div class="legend">
       <span>rep length: 400 m <span class="swatch gradbar"></span> 2 mi</span>
       <span>◆ track-snapped rep</span>
       <span style="color:#a61e4d;font-weight:700">R race</span>
-    </div>
-    <p class="note">Points only — never interpolated across gaps. Click a point to open the session.</p>
-  </div>
-  <div class="card">
-    <h2>Training VDOT <span class="muted small">— rolling 4-week workout LT, as 10k pace</span></h2>
-    <div id="vdotchart">${vdotSvg||'<p class="muted">No data.</p>'}</div>
-    <div class="legend">
-      <span><span class="swatch" style="background:#1971c2"></span>training VDOT</span>
+      ${overlay?`<span><span class="swatch" style="background:#495057;height:3px"></span>training VDOT (4-wk)</span>
       <span><span class="swatch" style="background:#a61e4d;border-radius:50%"></span>race VDOT</span>
-      <span><span class="swatch" style="background:#fff;border:2px solid #a61e4d;border-radius:50%"></span>race under 3 km (doesn't set LT)</span>
+      <span><span class="swatch" style="background:#fff;border:2px solid #a61e4d;border-radius:50%"></span>under 3 km</span>`:""}
     </div>
-    <p class="note">Race dots above the line beat what training suggested; below fell short. The line breaks where threshold sessions are more than 4 weeks apart.</p>
+    <p class="note">Points only — never interpolated across gaps. Click a point to open the session.${overlay?" Training VDOT = mean workout LT over the prior 4 weeks, as 10k pace; race dots above the line beat what training suggested.":""}</p>
   </div>
   <div class="grid2">
     <div class="card"><h2>Quality minutes / week</h2>${qSvg||'<p class="muted">No data.</p>'}</div>
@@ -426,17 +394,13 @@ async function viewProgression(){
     <div class="sharelegend"><span><span class="swatch" style="background:#2f9e44"></span>target 20–25%</span><span><span class="swatch" style="background:#e03131"></span>caution 30%</span></div>
   </div>`;
 
-  document.getElementById("hrtoggle").onchange=e=>{ progShowHR=e.target.checked; viewProgression(); };
-  wirePoints(document.getElementById("hero"),pts,p=>
-    `<div class="tt-title">${esc(p.label||"Threshold")} · ${esc(fmtDate(p.x))}</div>
-     pace ${esc(fmtPace(p.y))}${p.track?" ◆track":""}<br>
-     <span class="mut">rep HR ${p.hr!=null?Math.round(p.hr)+" bpm":"–"} · Q ${p.qmin!=null?Math.round(p.qmin)+" min":"–"} · med rep ${p.medm?esc(splitDist(p.medm,p.track))+" / ":""}${p.med!=null?Math.round(p.med)+"s":"–"}</span>`,
-    p=>location.hash="#workout/"+p.id);
-  if(vdotSvg) wirePoints(document.getElementById("vdotchart"),vpts,p=>p.race
+  document.getElementById("vdottoggle").onchange=e=>{ progShowVdot=e.target.checked; viewProgression(); };
+  wirePoints(document.getElementById("hero"),[...pts,...(overlay?overlay.dots:[])],p=>p.race
     ?`<div class="tt-title">${esc(p.name||"Race")} · ${esc(fmtDate(p.x))}</div>
       race VDOT ${p.y.toFixed(1)}<br><span class="mut">${esc(fmtRunDist(p.d,p.track))} in ${esc(fmtClock(p.t))}${p.short?" · under 3 km":""}</span>`
-    :`<div class="tt-title">Training VDOT · ${esc(fmtDate(p.x))}</div>
-      VDOT ${p.y.toFixed(1)}<br><span class="mut">LT ${esc(fmtPace(p.lt))} over ${p.n} session${p.n===1?"":"s"}</span>`,
+    :`<div class="tt-title">${esc(p.label||"Threshold")} · ${esc(fmtDate(p.x))}</div>
+     pace ${esc(fmtPace(p.y))}${p.track?" ◆track":""}<br>
+     <span class="mut">rep HR ${p.hr!=null?Math.round(p.hr)+" bpm":"–"} · Q ${p.qmin!=null?Math.round(p.qmin)+" min":"–"} · med rep ${p.medm?esc(splitDist(p.medm,p.track))+" / ":""}${p.med!=null?Math.round(p.med)+"s":"–"}</span>`,
     p=>location.hash="#workout/"+p.id);
 }
 
