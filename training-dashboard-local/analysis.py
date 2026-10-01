@@ -5,6 +5,7 @@ Pure functions over the DB. All pace values are seconds/km; times are unix.
 
 import datetime
 import json
+import math
 
 from db import get_settings
 
@@ -158,10 +159,49 @@ def _nearest_race_distance(dist_m, factors):
     return best
 
 
+# ---------- VDOT (Daniels–Gilbert) ----------
+# Puts any race distance on one scale, so non-standard races still convert
+# to an LT and training can predict a time at any distance.
+
+MIN_LT_RACE_M = 3000  # shorter races are too speed-biased to say much about LT
+
+
+def vdot(dist_m, time_s):
+    t = time_s / 60.0
+    v = dist_m / t  # m/min
+    vo2 = -4.60 + 0.182258 * v + 0.000104 * v * v
+    pct = (0.8 + 0.1894393 * math.exp(-0.012778 * t)
+           + 0.2989558 * math.exp(-0.1932605 * t))
+    return vo2 / pct
+
+
+def vdot_race_time(v, dist_m):
+    """Time (s) at dist_m for a given VDOT; vdot() falls as time grows."""
+    lo, hi = 30.0, 12 * 3600.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if vdot(dist_m, mid) > v:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+# LT is 10k race pace, matching the 10 km factor of 1.00
+def vdot_lt_pace(v):
+    return vdot_race_time(v, 10000) / 10.0
+
+
+def lt_vdot(lt_pace):
+    return vdot(10000, lt_pace * 10.0)
+
+
 def race_predictions(conn, settings):
-    """Race-derived predicted LT pace step line + HR effort qualifier."""
+    """Race VDOT, race-derived LT (step line) + HR effort qualifier.
+    LT comes from the editable factor table at a standard distance, else from
+    VDOT via the 10k-equivalent pace. Races under 3 km never set LT."""
     factors = settings["race_lt_factors"]
-    lthr, max_hr = settings["lthr"], settings["max_hr"]
+    lthr = settings["lthr"]
     races = conn.execute(
         "SELECT * FROM activities WHERE classification='race' "
         "ORDER BY start_time").fetchall()
@@ -169,60 +209,54 @@ def race_predictions(conn, settings):
     for r in races:
         if not r["distance_m"] or not r["elapsed_s"]:
             continue
-        rd = _nearest_race_distance(r["distance_m"], factors)
-        race_pace = r["elapsed_s"] / (r["distance_m"] / 1000.0)
-        if rd is None:
-            out.append({"activity_id": r["id"], "name": r["name"],
-                        "date": r["start_time"], "distance_m": r["distance_m"],
-                        "track": bool(r["track_detected"]),
-                        "time_s": r["elapsed_s"], "race_pace": race_pace,
-                        "predicted_lt": None, "note": "non-standard distance",
-                        "qualifier": None, "avg_hr": r["avg_hr"]})
-            continue
-        mult = _race_factor(rd, factors)
-        pred_lt = race_pace * mult
-        qualifier = None
+        d = r["distance_m"]
+        race_pace = r["elapsed_s"] / (d / 1000.0)
+        race_vdot = vdot(d, r["elapsed_s"])
+        rd = _nearest_race_distance(d, factors)
+        pred_lt, mult, method, note = None, None, None, None
+        if d < MIN_LT_RACE_M:
+            note = "under 3 km — doesn't update LT"
+        elif rd is not None:
+            mult = _race_factor(rd, factors)
+            pred_lt, method = race_pace * mult, "factor"
+        else:
+            pred_lt, method = vdot_lt_pace(race_vdot), "vdot"
         avg_hr = r["avg_hr"]
+        qualifier = None
         if avg_hr is None:
             qualifier = "no-hr"
-        elif lthr and rd <= 10000 and avg_hr < lthr - 5:
+        elif lthr and d <= 10500 and avg_hr < lthr - 5:
             qualifier = "partial"
         out.append({"activity_id": r["id"], "name": r["name"],
-                    "date": r["start_time"], "distance_m": r["distance_m"],
+                    "date": r["start_time"], "distance_m": d,
                     "track": bool(r["track_detected"]),
                     "time_s": r["elapsed_s"], "race_pace": race_pace,
-                    "predicted_lt": pred_lt, "race_dist": rd,
-                    "factor": mult, "qualifier": qualifier, "avg_hr": avg_hr})
+                    "vdot": race_vdot, "predicted_lt": pred_lt,
+                    "race_dist": rd, "factor": mult, "lt_method": method,
+                    "note": note, "qualifier": qualifier, "avg_hr": avg_hr})
     return out
 
 
 def race_execution(conn, settings):
-    """Per race: actual vs predicted-from-training time."""
-    factors = settings["race_lt_factors"]
+    """Per race: actual vs predicted-from-training time and VDOT."""
     lt_pts = workout_lt_points(conn, settings)
     results = []
     for rp in race_predictions(conn, settings):
-        if rp["predicted_lt"] is None or rp["race_dist"] is None:
-            results.append({**rp, "predicted_time": None, "delta_s": None,
-                            "delta_pct": None})
-            continue
-        rd = rp["race_dist"]
         # mean workout-derived LT over 6 weeks before the race
         cutoff = rp["date"] - 6 * 7 * 86400
         prior = [p["lt_pace"] for p in lt_pts if cutoff <= p["date"] < rp["date"]]
         if not prior:
             results.append({**rp, "predicted_time": None, "delta_s": None,
-                            "delta_pct": None,
+                            "delta_pct": None, "training_vdot": None,
                             "note": "no threshold sessions in prior 6 weeks"})
             continue
         mean_lt = sum(prior) / len(prior)
-        mult = _race_factor(rd, factors)
-        # invert: race_pace = LT / mult
-        pred_race_pace = mean_lt / mult
-        pred_time = pred_race_pace * (rp["distance_m"] / 1000.0)
+        train_vdot = lt_vdot(mean_lt)
+        pred_time = vdot_race_time(train_vdot, rp["distance_m"])
         delta = rp["time_s"] - pred_time
         results.append({**rp, "predicted_time": pred_time, "delta_s": delta,
-                        "delta_pct": 100.0 * delta / pred_time if pred_time else None,
+                        "delta_pct": 100.0 * delta / pred_time,
+                        "training_lt": mean_lt, "training_vdot": train_vdot,
                         "n_prior": len(prior)})
     return results
 

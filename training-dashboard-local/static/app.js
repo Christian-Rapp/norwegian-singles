@@ -446,23 +446,30 @@ function raceQualifiers(rp){
     +(rp.qualifier==="no-hr"?'<span class="qual nohr">no HR data</span>':"");
 }
 function raceExecutionHtml(rp,s){
+  const sgn=v=>(v<0?"-":"+")+Math.abs(v);
   let predLine;
   if(rp.predicted_time!=null&&rp.time_s!=null){
     const shown=rp.predicted_time-rp.time_s; // negative = slower than training suggested
-    const sgn=v=>(v<0?"-":"+")+Math.abs(Math.round(v));
     const pct=(100*shown/rp.predicted_time).toFixed(1);
-    predLine=`<p><strong>Training suggested ${esc(fmtClock(rp.predicted_time))}; you ran ${esc(fmtClock(rp.time_s))}</strong> (${sgn(shown)}s, ${shown<0?"-":"+"}${Math.abs(pct)}%)</p>
-    <p class="note"><span class="formula">predicted time = (training LT ÷ ${rp.factor}) × ${(rp.distance_m/MILE_M).toFixed(2)} mi</span><br>
-    <span class="muted">training LT = mean workout-derived LT over ${rp.n_prior!=null?rp.n_prior:0} threshold sessions in the 6 weeks before the race.</span></p>`;
+    const dv=rp.vdot-rp.training_vdot;
+    predLine=`<p><strong>Training suggested ${esc(fmtClock(rp.predicted_time))}; you ran ${esc(fmtClock(rp.time_s))}</strong> (${sgn(Math.round(shown))}s, ${shown<0?"-":"+"}${Math.abs(pct)}%)</p>
+    <p><strong>Race VDOT ${rp.vdot.toFixed(1)}</strong> vs training VDOT ${rp.training_vdot.toFixed(1)} (${sgn(+dv.toFixed(1))})</p>
+    <p class="note"><span class="formula">training LT ${esc(fmtPace(rp.training_lt))} as 10k pace → VDOT ${rp.training_vdot.toFixed(1)} → ${(rp.distance_m/MILE_M).toFixed(2)} mi in ${esc(fmtClock(rp.predicted_time))}</span><br>
+    <span class="muted">training LT = mean workout-derived LT over ${rp.n_prior} threshold sessions in the 6 weeks before the race.</span></p>`;
   } else {
-    predLine=`<p class="muted">No prediction — ${esc(rp.note||"not enough pre-race training data")}.</p>`;
+    predLine=`<p>Race VDOT <strong>${rp.vdot!=null?rp.vdot.toFixed(1):"–"}</strong></p>
+    <p class="muted">No prediction — ${esc(rp.note||"not enough pre-race training data")}.</p>`;
   }
   const hrCtx=rp.avg_hr!=null
     ? `<p>Race avg HR <strong>${Math.round(rp.avg_hr)} bpm</strong>${s.lthr?` vs LTHR ${s.lthr} bpm`:""}.</p>`
     : `<p class="muted">No HR data for this race.</p>`;
-  const formula=rp.predicted_lt!=null
-    ? `<p class="note"><span class="formula">predicted LT = ${raceDistLabel(rp.race_dist)} pace × ${rp.factor}</span> = ${esc(fmtPace(rp.race_pace))} × ${rp.factor} = <strong>${esc(fmtPace(rp.predicted_lt))}</strong></p>`
-    : (rp.note&&rp.predicted_time!=null?`<p class="note">${esc(rp.note)}</p>`:"");
+  let formula="";
+  if(rp.lt_method==="factor")
+    formula=`<p class="note"><span class="formula">predicted LT = ${raceDistLabel(rp.race_dist)} pace × ${rp.factor}</span> = ${esc(fmtPace(rp.race_pace))} × ${rp.factor} = <strong>${esc(fmtPace(rp.predicted_lt))}</strong></p>`;
+  else if(rp.lt_method==="vdot")
+    formula=`<p class="note"><span class="formula">predicted LT = 10k-equivalent pace at VDOT ${rp.vdot.toFixed(1)}</span> = <strong>${esc(fmtPace(rp.predicted_lt))}</strong></p>`;
+  else if(rp.distance_m<3000)
+    formula=`<p class="note">Under 3 km — too speed-biased to update LT.</p>`;
   return predLine+formula+hrCtx;
 }
 async function viewRaces(){
@@ -504,7 +511,7 @@ async function viewRaces(){
     ${chart||'<p class="muted">Not enough data yet.</p>'}
     <div class="legend"><span><span class="swatch" style="background:#1971c2"></span>workout-derived LT</span>
     <span><span class="swatch" style="background:#a61e4d"></span>race-predicted LT (flat between races, never backfilled)</span></div>
-    <p class="note">Workout LT = avg rep pace ÷ Bakken duration factor. Race LT = race pace × race-distance factor. Hover any dot for its formula.</p>
+    <p class="note">Workout LT = avg rep pace ÷ Bakken duration factor. Race LT = race pace × race-distance factor, or the VDOT 10k-equivalent pace for other distances (races under 3 km don't count). Hover any dot for its formula.</p>
   </div>
   <h2 style="margin:18px 0 10px">Race execution</h2>
   ${cards}`;
@@ -555,7 +562,7 @@ async function viewSettings(){
   </div>
   <div class="card">
     <h2>Race → LT factors</h2>
-    <p class="note">Predicted LT = race pace × factor. Inverted for execution checks: predicted race pace = training LT ÷ factor.</p>
+    <p class="note">Predicted LT = race pace × factor at these distances. Other distances (3 km and up) convert through VDOT to a 10k-equivalent pace; races under 3 km never set LT. Race-time predictions always use VDOT.</p>
     <table><thead><tr><th>Distance</th><th class="num">Factor</th></tr></thead><tbody>
     ${rfKeys.map(k=>`<tr><td>${esc(RACE_LABELS[k]||(k+" m"))}<input type="hidden" data-rf-k value="${esc(k)}"></td>
       <td class="num"><input type="number" data-rf-v value="${s.race_lt_factors[k]}" step="0.000001" min="0.5" max="1.5" style="width:110px"></td></tr>`).join("")}
